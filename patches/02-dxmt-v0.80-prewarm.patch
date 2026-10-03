@@ -1,0 +1,111 @@
+diff --git a/src/d3d11/d3d11_device.cpp b/src/d3d11/d3d11_device.cpp
+index 6a8caca..a70b886 100644
+--- a/src/d3d11/d3d11_device.cpp
++++ b/src/d3d11/d3d11_device.cpp
+@@ -231,7 +231,7 @@ public:
+ 
+     return pipeline_cache_->AddInputLayout(
+         pShaderBytecodeWithInputSignature, pInputElementDescs, NumElements,
+-        (IMTLD3D11InputLayout **)ppInputLayout);
++        (IMTLD3D11InputLayout **)ppInputLayout, BytecodeLength);
+   }
+ 
+   HRESULT STDMETHODCALLTYPE
+diff --git a/src/d3d11/d3d11_pipeline_cache.cpp b/src/d3d11/d3d11_pipeline_cache.cpp
+index ec17d04..db80c92 100644
+--- a/src/d3d11/d3d11_pipeline_cache.cpp
++++ b/src/d3d11/d3d11_pipeline_cache.cpp
+@@ -6,6 +6,7 @@
+ #include "dxmt_shader_cache.hpp"
+ #include "dxmt_tasks.hpp"
+ #include "log/log.hpp"
++#include "util_env.hpp"
+ #include "sha1/sha1_util.hpp"
+ #include "../d3d10/d3d10_shader.hpp"
+ #include "../d3d10/d3d10_input_layout.hpp"
+@@ -65,6 +66,13 @@ template <> struct task_trait<ThreadpoolWork *> {
+   void set_done(ThreadpoolWork *task) { task->SetIsDone(true); }
+ };
+ 
++/* DXMT_PREWARM=1: start compiling compute pipelines and vertex shader variants when the
++ * game creates them (loading screens) rather than at first use. */
++static inline bool PrewarmEnabled() {
++  static const bool enabled = env::getEnvVar("DXMT_PREWARM") == "1";
++  return enabled;
++}
++
+ class PipelineCache : public MTLD3D11PipelineCacheBase {
+ 
+   class CachedSM50Shader final : public Shader {
+@@ -74,6 +82,7 @@ class PipelineCache : public MTLD3D11PipelineCacheBase {
+     MTL_SHADER_REFLECTION reflection_;
+     MTL_SM50_SHADER_ARGUMENT *arguments_info_buffer;
+     std::unordered_map<ShaderVariant, std::unique_ptr<CompiledShader>> variants;
++    dxmt::mutex variants_mutex_;
+ 
+   public:
+     CachedSM50Shader(PipelineCache *cache, sm50_shader_t shader_transferred,
+@@ -113,6 +122,7 @@ class PipelineCache : public MTLD3D11PipelineCacheBase {
+       return arguments_info_buffer + reflection_.NumConstantBuffers;
+     };
+     virtual CompiledShader *get_shader(ShaderVariant variant) {
++      std::lock_guard<dxmt::mutex> lock(variants_mutex_);
+       auto c = variants.insert({variant, nullptr});
+       if (c.second) {
+         c.first->second = std::visit(
+@@ -316,13 +326,21 @@ class PipelineCache : public MTLD3D11PipelineCacheBase {
+     }
+     *ppShader =
+         ref(new TShaderBase<ID3D11ComputeShader>(device, managed_shader));
++    if (PrewarmEnabled()) {
++      // A compute pipeline depends only on its shader: compile it now (usually on a
++      // loading screen) instead of at the first Dispatch.
++      MTLCompiledComputePipeline *pipeline;
++      MTL_COMPUTE_PIPELINE_DESC desc{managed_shader};
++      GetComputePipeline(&desc, &pipeline);
++    }
+     return S_OK;
+   }
+ 
+   HRESULT AddInputLayout(const void *pShaderBytecodeWithInputSignature,
+                          const D3D11_INPUT_ELEMENT_DESC *pInputElementDesc,
+                          UINT NumElements,
+-                         IMTLD3D11InputLayout **ppInputLayout) override {
++                         IMTLD3D11InputLayout **ppInputLayout,
++                         SIZE_T BytecodeLength) override {
+     std::lock_guard<dxmt::mutex> lock(mutex_ia_);
+     std::vector<MTL_SHADER_INPUT_LAYOUT_ELEMENT_DESC> buffer(NumElements);
+     uint32_t num_metal_ia_elements;
+@@ -341,8 +359,17 @@ class PipelineCache : public MTLD3D11PipelineCacheBase {
+       input_layouts.emplace(buffer, std::make_unique<CachedInputLayout>(
+                                         std::move(buffer), input_slot_mask));
+     }
+-    *ppInputLayout =
+-        ref(new MTLD3D11InputLayout(device, input_layouts.at(buffer).get()));
++    auto managed_layout = input_layouts.at(buffer).get();
++    *ppInputLayout = ref(new MTLD3D11InputLayout(device, managed_layout));
++    if (PrewarmEnabled() && BytecodeLength) {
++      // The game passes the vertex shader's bytecode here: translate the variant that
++      // ordinary draws will ask for (no GS, rasterization on) in the background.
++      auto sha1 = Sha1HashState::compute(pShaderBytecodeWithInputSignature,
++                                         BytecodeLength);
++      std::shared_lock<std::shared_mutex> lock(mutex_shares);
++      if (auto vs = shaders_.find(sha1); vs != shaders_.end())
++        vs->second->get_shader(ShaderVariantVertex{managed_layout, ~0u, false});
++    }
+     return hr;
+   }
+ 
+diff --git a/src/d3d11/d3d11_pipeline_cache.hpp b/src/d3d11/d3d11_pipeline_cache.hpp
+index 5439520..4e18266 100644
+--- a/src/d3d11/d3d11_pipeline_cache.hpp
++++ b/src/d3d11/d3d11_pipeline_cache.hpp
+@@ -16,7 +16,7 @@ public:
+   virtual HRESULT AddComputeShader(const void *pBytecode, uint32_t BytecodeLength, ID3D11ComputeShader **ppShader) = 0;
+   virtual HRESULT AddInputLayout(
+       const void *pShaderBytecodeWithInputSignature, const D3D11_INPUT_ELEMENT_DESC *pInputElementDesc,
+-      UINT NumElements, IMTLD3D11InputLayout **ppInputLayout
++      UINT NumElements, IMTLD3D11InputLayout **ppInputLayout, SIZE_T BytecodeLength = 0
+   ) = 0;
+   virtual HRESULT AddStreamOutputLayout(
+       const void *pShaderBytecode, UINT NumEntries, const D3D11_SO_DECLARATION_ENTRY *pEntries, UINT NumStrides,

@@ -1,0 +1,44 @@
+diff --git a/src/dxmt/dxmt_tasks.hpp b/src/dxmt/dxmt_tasks.hpp
+index 6762d47..273cdc4 100644
+--- a/src/dxmt/dxmt_tasks.hpp
++++ b/src/dxmt/dxmt_tasks.hpp
+@@ -1,8 +1,10 @@
+ #pragma once
+ 
+ #include "thread.hpp"
++#include "util_env.hpp"
+ #include "util_win32_compat.h"
+ #include <atomic>
++#include <cstdlib>
+ #include <queue>
+ #include <unordered_map>
+ 
+@@ -47,8 +49,11 @@ private:
+ 
+ template <typename Task> task_scheduler<Task>::task_scheduler() {
+   max_threads = dxmt::thread::hardware_concurrency() * 2;
++  /* DXMT_COMPILER_THREADS=N caps the shader/pipeline compiler workers (default 2x cores). */
++  if (auto n = std::atoi(env::getEnvVar("DXMT_COMPILER_THREADS").c_str()); n > 0)
++    max_threads = n;
+   workers_.reserve(max_threads);
+-  threads = 2;
++  threads = std::min<uint64_t>(2, max_threads);
+ 
+   for (unsigned i = 0; i < threads; i++) {
+     workers_.emplace_back([this]() { worker_func(); });
+@@ -72,7 +77,14 @@ void
+ task_scheduler<Task>::worker_func() {
+   struct task_trait<Task> task_trait;
+   std::vector<Task> continuation_buffer;
+-  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
++  /* DXMT_COMPILER_PRIORITY=low|normal (default: time critical). With async pipelines the
++   * game doesn't wait for these, so they shouldn't preempt the game's own threads. */
++  static const int priority = [] {
++    auto p = env::getEnvVar("DXMT_COMPILER_PRIORITY");
++    return p == "low" ? THREAD_PRIORITY_BELOW_NORMAL
++         : p == "normal" ? THREAD_PRIORITY_NORMAL : THREAD_PRIORITY_TIME_CRITICAL;
++  }();
++  SetThreadPriority(GetCurrentThread(), priority);
+   while (!destroyed.load()) {
+     Task task;
+     {

@@ -1,0 +1,22 @@
+MIT License
+
+Copyright (c) 2026 overwatch-mac-stutter-fix contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of the scripts in this
+repository (install.command, launch.command, uninstall.command, lib/common.sh,
+tools/ow-bench.py) and associated
+documentation, to deal in them without restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell copies, and to permit persons to whom
+they are furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the scripts.
+
+THE SCRIPTS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SCRIPTS OR THE USE OR OTHER DEALINGS IN THE SCRIPTS.
+
+The binaries in payload/ are licensed separately: d3d9.dll (DXVK) under the zlib/libpng license
+(licenses/DXVK-LICENSE), d3d11.dll (DXMT) under the MIT license (licenses/DXMT-LICENSE).

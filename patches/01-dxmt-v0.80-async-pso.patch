@@ -1,0 +1,239 @@
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index d53be63..1fc8cb9 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -16,6 +16,7 @@ since it is for internal use only
+ #include "d3d11_context_state.hpp"
+ #include "d3d11_device.hpp"
+ #include "d3d11_pipeline.hpp"
++#include "util_env.hpp"
+ #include "d3d11_query.hpp"
+ #include "dxmt_buffer.hpp"
+ #include "dxmt_context.hpp"
+@@ -30,6 +31,15 @@ since it is for internal use only
+ 
+ namespace dxmt {
+ 
++/* DXMT_ASYNC_PSO=1: don't block command encoding on pipelines that are still
++ * compiling in the thread pool; skip the affected draws instead (they show
++ * up a frame or two later). Avoids frame-time spikes on first use. */
++static inline bool AsyncPipelinesEnabled() {
++  static const bool enabled = env::getEnvVar("DXMT_ASYNC_PSO") == "1";
++  return enabled;
++}
++
++
+ template<typename Object> Rc<Object> forward_rc(Rc<Object>& obj);
+ 
+ inline bool
+@@ -1256,6 +1266,8 @@ public:
+     EmitOP([Primitive, StartVertexLocation, VertexCount](ArgumentEncodingContext& enc) {
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw>();
+       cmd.type = WMTRenderCommandDraw;
+       cmd.primitive_type = Primitive;
+@@ -1295,6 +1307,8 @@ public:
+       enc.bumpVisibilityResultOffset();
+       auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indexed>();
+       cmd.type = WMTRenderCommandDrawIndexed;
+       cmd.primitive_type = Primitive;
+@@ -1333,6 +1347,8 @@ public:
+           StartInstanceLocation](ArgumentEncodingContext &enc) {
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw>();
+       cmd.type = WMTRenderCommandDraw;
+       cmd.primitive_type = Primitive;
+@@ -1381,6 +1397,8 @@ public:
+       enc.bumpVisibilityResultOffset();
+       auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indexed>();
+       cmd.type = WMTRenderCommandDrawIndexed;
+       cmd.primitive_type = Primitive;
+@@ -1409,7 +1427,7 @@ public:
+       draw_argument->StartInstance = StartInstanceLocation;
+ 
+       auto PatchCountPerInstance = VertexCountPerInstance / NumControlPoint;
+-      auto PatchPerGroup = 32 / enc.tess_threads_per_patch;
++      auto PatchPerGroup = 32 / (enc.tess_threads_per_patch ? enc.tess_threads_per_patch : 32); // 0 while the PSO is still compiling (async)
+       auto ThreadsPerPatch = enc.tess_threads_per_patch;
+       auto PatchPerObjectInstance = (PatchCountPerInstance - 1) / PatchPerGroup + 1;
+ 
+@@ -1423,6 +1441,8 @@ public:
+ 
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw>();
+       cmd.type = WMTRenderCommandDXMTTessellationMeshDraw;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1450,7 +1470,7 @@ public:
+       draw_argument->StartInstance = BaseInstance;
+ 
+       auto PatchCountPerInstance = IndexCountPerInstance / NumControlPoint;
+-      auto PatchPerGroup = 32 / enc.tess_threads_per_patch;
++      auto PatchPerGroup = 32 / (enc.tess_threads_per_patch ? enc.tess_threads_per_patch : 32); // 0 while the PSO is still compiling (async)
+       auto ThreadsPerPatch = enc.tess_threads_per_patch;
+       auto PatchPerObjectInstance = (PatchCountPerInstance - 1) / PatchPerGroup + 1;
+ 
+@@ -1465,6 +1485,8 @@ public:
+       auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw_indexed>();
+       cmd.type = WMTRenderCommandDXMTTessellationMeshDrawIndexed;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1501,6 +1523,8 @@ public:
+ 
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw>();
+       cmd.type = WMTRenderCommandDXMTGeometryDraw;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1537,6 +1561,8 @@ public:
+ 
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.currentRenderEncoder()->pso_pending)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw_indexed>();
+       cmd.type = WMTRenderCommandDXMTGeometryDrawIndexed;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1578,6 +1604,8 @@ public:
+         enc.bumpVisibilityResultOffset();
+         auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+         enc.resolveRenderPassBarrier();
++        if (enc.currentRenderEncoder()->pso_pending)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indexed_indirect>();
+         cmd.type = WMTRenderCommandDrawIndexedIndirect;
+         cmd.primitive_type = Primitive;
+@@ -1615,6 +1643,8 @@ public:
+         );
+         enc.bumpVisibilityResultOffset();
+         enc.resolveRenderPassBarrier();
++        if (enc.currentRenderEncoder()->pso_pending)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indirect>();
+         cmd.type = WMTRenderCommandDrawIndirect;
+         cmd.primitive_type = Primitive;
+@@ -1644,6 +1674,8 @@ public:
+           dispatch_arg.gpu_buffer, dispatch_arg.gpu_address, dispatch_arg.offset, max_object_threadgroups
+         );
+         enc.resolveRenderPassBarrier();
++        if (enc.currentRenderEncoder()->pso_pending)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw_indirect>();
+         cmd.type = WMTRenderCommandDXMTGeometryDrawIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -1679,6 +1711,8 @@ public:
+           dispatch_arg.gpu_buffer, dispatch_arg.gpu_address, dispatch_arg.offset, max_object_threadgroups
+         );
+         enc.resolveRenderPassBarrier();
++        if (enc.currentRenderEncoder()->pso_pending)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw_indexed_indirect>();
+         cmd.type = WMTRenderCommandDXMTGeometryDrawIndexedIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -1705,7 +1739,7 @@ public:
+         );
+         auto dispatch_arg = enc.allocateTempBuffer1(sizeof(DXMT_DISPATCH_ARGUMENTS), 4);
+ 
+-        auto PatchPerGroup = 32 / enc.tess_threads_per_patch;
++        auto PatchPerGroup = 32 / (enc.tess_threads_per_patch ? enc.tess_threads_per_patch : 32); // 0 while the PSO is still compiling (async)
+         auto ThreadsPerPatch = enc.tess_threads_per_patch;
+   
+         enc.bumpVisibilityResultOffset();
+@@ -1715,6 +1749,8 @@ public:
+             dispatch_arg.gpu_buffer, dispatch_arg.gpu_address,
+             dispatch_arg.offset, max_object_threadgroups);
+         enc.resolveRenderPassBarrier();
++        if (enc.currentRenderEncoder()->pso_pending)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw_indirect>();
+         cmd.type = WMTRenderCommandDXMTTessellationMeshDrawIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -1742,7 +1778,7 @@ public:
+         );
+         auto dispatch_arg = enc.allocateTempBuffer1(sizeof(DXMT_DISPATCH_ARGUMENTS), 4);
+ 
+-        auto PatchPerGroup = 32 / enc.tess_threads_per_patch;
++        auto PatchPerGroup = 32 / (enc.tess_threads_per_patch ? enc.tess_threads_per_patch : 32); // 0 while the PSO is still compiling (async)
+         auto ThreadsPerPatch = enc.tess_threads_per_patch;
+         auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+   
+@@ -1753,6 +1789,8 @@ public:
+             dispatch_arg.gpu_buffer, dispatch_arg.gpu_address,
+             dispatch_arg.offset, max_object_threadgroups);
+         enc.resolveRenderPassBarrier();
++        if (enc.currentRenderEncoder()->pso_pending)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw_indexed_indirect>();
+         cmd.type = WMTRenderCommandDXMTTessellationMeshDrawIndexedIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -4668,6 +4706,11 @@ public:
+       auto render_encoder = enc.currentRenderEncoder();
+       render_encoder->use_tessellation = 1;
+       MTL_COMPILED_TESSELLATION_MESH_PIPELINE GraphicsPipeline{};
++      if (AsyncPipelinesEnabled() && !pso->GetIsDone()) {
++        render_encoder->pso_pending = true;
++        return;
++      }
++      render_encoder->pso_pending = false;
+       pso->GetPipeline(&GraphicsPipeline); // may block
+       enc.tess_num_output_control_point_element = GraphicsPipeline.NumControlPointOutputElement;
+       enc.tess_threads_per_patch = GraphicsPipeline.ThreadsPerPatch;
+@@ -4716,6 +4759,11 @@ public:
+       auto render_encoder = enc.currentRenderEncoder();
+       render_encoder->use_geometry = 1;
+       MTL_COMPILED_GRAPHICS_PIPELINE GraphicsPipeline{};
++      if (AsyncPipelinesEnabled() && !pso->GetIsDone()) {
++        render_encoder->pso_pending = true;
++        return;
++      }
++      render_encoder->pso_pending = false;
+       pso->GetPipeline(&GraphicsPipeline); // may block
+       if (!GraphicsPipeline.PipelineState)
+         return;
+@@ -4772,6 +4820,11 @@ public:
+     device->CreateGraphicsPipeline(&pipelineDesc, &pipeline);
+     EmitST([pso = std::move(pipeline)](ArgumentEncodingContext& enc) {
+       MTL_COMPILED_GRAPHICS_PIPELINE GraphicsPipeline{};
++      if (AsyncPipelinesEnabled() && !pso->GetIsDone()) {
++        enc.currentRenderEncoder()->pso_pending = true;
++        return;
++      }
++      enc.currentRenderEncoder()->pso_pending = false;
+       pso->GetPipeline(&GraphicsPipeline); // may block
+       if (!GraphicsPipeline.PipelineState)
+         return;
+diff --git a/src/dxmt/dxmt_context.hpp b/src/dxmt/dxmt_context.hpp
+index 6356fae..6f03970 100644
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -182,6 +182,8 @@ struct RenderEncoderData : EncoderData {
+   bool use_geometry = 0;
+   TileBarrierPSOKey tile_barrier_pso_key = {};
+   WMT::RenderPipelineState last_pso = {};
++  // DXMT_ASYNC_PSO: the current pipeline is still compiling, skip draws
++  bool pso_pending = false;
+ };
+ 
+ struct ComputeEncoderData : EncoderData {

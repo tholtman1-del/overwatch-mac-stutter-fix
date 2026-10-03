@@ -1,0 +1,40 @@
+diff --git a/src/d3d11/d3d11_swapchain.cpp b/src/d3d11/d3d11_swapchain.cpp
+index 5e9404d..7638370 100644
+--- a/src/d3d11/d3d11_swapchain.cpp
++++ b/src/d3d11/d3d11_swapchain.cpp
+@@ -807,9 +807,35 @@ public:
+ 
+     cmd_queue.PresentBoundary();
+ 
++    LogFrameTime();
+     return hr;
+   };
+ 
++  /* DXMT_FRAMETIME_LOG=<windows path>: append the time between Present calls (ms, one per line)
++   * for offline benchmarking (tools/ow-bench.py). */
++  static void LogFrameTime() {
++    static FILE *file = [] {
++      auto path = env::getEnvVar("DXMT_FRAMETIME_LOG");
++      FILE *f = path.empty() ? nullptr : fopen(path.c_str(), "a");
++      if (f)
++        setvbuf(f, nullptr, _IOFBF, 1 << 16);
++      return f;
++    }();
++    static LARGE_INTEGER freq, last;
++    static uint32_t frames;
++    if (!file)
++      return;
++    LARGE_INTEGER now;
++    QueryPerformanceCounter(&now);
++    if (!freq.QuadPart)
++      QueryPerformanceFrequency(&freq);
++    else
++      fprintf(file, "%.3f\n", (now.QuadPart - last.QuadPart) * 1000.0 / freq.QuadPart);
++    last = now;
++    if (++frames % 240 == 0)
++      fflush(file);
++  }
++
+   void UpdateStatistics(const FrameStatisticsContainer& statistics, uint64_t frame_id) {
+     hud.begin();
+     auto &frame = statistics.at(frame_id - 1); // show the previous one frame statistics
