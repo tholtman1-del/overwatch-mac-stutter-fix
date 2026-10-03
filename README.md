@@ -1,5 +1,7 @@
 # Overwatch shader-stutter fix for Mac (CrossOver, Apple Silicon)
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/F2J527ZLUN)
+
 Overwatch on a Mac under CrossOver hitches every time something appears for the first time: a new
 hero, skin, ability effect or map. Each hitch is the GPU translation layer compiling a shader while
 the game waits. This package swaps in a modified build of [DXMT](https://github.com/3Shain/dxmt),
@@ -192,3 +194,9 @@ ninja -C build64 src/d3d11/d3d11.dll
 - Scripts and tools in this repository: MIT ([LICENSE](LICENSE)).
 - Not affiliated with or endorsed by Blizzard Entertainment, CodeWeavers or Apple. Overwatch is a
   trademark of Blizzard Entertainment.
+
+---
+
+If this made Overwatch smoother for you, you can [buy me a coffee on Ko-fi](https://ko-fi.com/F2J527ZLUN). ☕
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/F2J527ZLUN)
